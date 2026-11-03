@@ -132,37 +132,31 @@ def classify_why_strategyproof_despite_t54_failure(
     between its own arguments).
 
     Categories:
-    1. "Pure Direct Internal Conflict (Length-1 Only, Single Target)":
-       All odd-length paths within A_i have length 1 (direct attacks alpha -> beta)
-       or only defeat at most 1 argument per source alpha that is itself accepted.
-       Hiding alpha loses 1 accepted argument (alpha) to gain at most 1 argument (beta),
-       giving net utility change <= 0 (never strictly profitable).
-    2. "Cancellation / External Defense Neutralization (Example 5.11 Type)":
-       An odd-length indirect path (length >= 3, e.g. alpha -> gamma -> delta -> beta)
-       exists, but intermediate attackers on the path are neutralized by other arguments
-       or beta has independent undefeated attackers, so hiding alpha never yields a net
-       increase in accepted arguments.
-    3. "Cyclic / Self-Defeating Source":
-       The source argument alpha of the odd-length path is locked in a cycle or
-       defeated across induced subgraphs where beta could otherwise be affected.
+    1. "Odd Self-Cycle Only (alpha == beta)":
+       All odd-length paths within A_i start and end at the same argument
+       (alpha -> ... -> alpha). Since hiding alpha removes alpha itself from
+       the revealed graph, it can never rescue alpha or improve utility.
+    2. "Direct Internal Conflict Only (Length-1 Swap / Defeated Attacker)":
+       All distinct-argument odd paths within A_i have length 1 (alpha -> beta).
+       Whenever alpha blocks beta, either alpha is itself accepted (so hiding
+       alpha loses alpha [-1] to gain at most beta [+1], net change <= 0) or
+       alpha is defeated / beta is independently blocked.
+    3. "Indirect Odd Path Neutralized or 1-for-1 Bounded (Example 5.11 Type)":
+       An indirect odd-length path (length >= 3, e.g. alpha -> gamma -> delta -> beta)
+       exists between distinct arguments in A_i, but either intermediate attackers
+       are defeated by other arguments (cancelling the indirect self-defeat, as in
+       Example 5.11 where a6 -> a3) or hiding alpha trades at most 1 accepted
+       argument for 1 rescued argument (net utility change <= 0).
     """
-    has_indirect_odd = any(v.length >= 3 for v in violations)
+    distinct_violations = [v for v in violations if v.source != v.target]
+    if not distinct_violations:
+        return "Odd Self-Cycle Only (alpha == beta: hiding alpha removes it, so it cannot rescue another argument in A_i)"
+
+    has_indirect_odd = any(v.length >= 3 for v in distinct_violations)
     if not has_indirect_odd:
-        # Only length-1 direct attacks alpha -> beta inside some A_i
-        return "Direct Internal Conflict Only (Length-1 Swap Neutrality: losing alpha gains at most beta, net gain <= 0)"
+        return "Direct Internal Conflict Only (Length-1 Swap / Neutralized: losing accepted alpha gains at most beta, net gain <= 0)"
 
-    # Check if any source alpha attacks or indirectly defeats multiple targets in A_i
-    targets_by_agent_source: Dict[Tuple[str, str], Set[str]] = {}
-    for v in violations:
-        key = (v.agent, v.source)
-        if v.source != v.target:
-            targets_by_agent_source.setdefault(key, set()).add(v.target)
-
-    max_targets = max((len(t) for t in targets_by_agent_source.values()), default=0)
-    if max_targets <= 1:
-        return "Single-Target Indirect Defeat (Hiding accepted source alpha at best swaps 1-for-1 with target beta, net gain <= 0)"
-
-    return "Path Cancellation / Redundant Defeat (Intermediate node on odd path is defeated or target is independently blocked, as in Example 5.11)"
+    return "Indirect Odd Path Cancelled or 1-for-1 Bounded (Example 5.11 Type: intermediate attacker defeated or hiding alpha swaps <=1 for <=1)"
 
 
 def run_experiments(
