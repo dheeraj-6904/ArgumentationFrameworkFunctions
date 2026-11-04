@@ -1,10 +1,12 @@
 """
 tests/test_experiments_and_examples.py
 
-Unit tests for Component 4: Book Examples demonstration (`src/book_examples.py`)
-and Random Instance Experiments (`src/experiments.py`).
+Unit tests for Component 4: Book Examples demonstration (`src/book_examples.py`),
+Random Instance Generator (`allow_self_attacks=True, require_non_empty_agents=True`),
+and Verified Outcome Analyzer (`src/experiments.py`).
 """
 
+import random
 from src.book_examples import (
     build_example_5_10,
     build_example_5_11,
@@ -12,7 +14,12 @@ from src.book_examples import (
     build_figure_5_2,
     run_book_demonstration,
 )
-from src.experiments import run_experiments
+from src.experiments import (
+    generate_random_instance,
+    run_experiments,
+    verify_why_strategyproof_despite_t54_failure,
+)
+from src.strategic import check_theorem_5_4_condition
 
 
 def test_book_builders_and_demonstration() -> None:
@@ -37,6 +44,34 @@ def test_book_builders_and_demonstration() -> None:
     assert "Misprint" in output
 
 
+def test_generator_non_empty_and_self_attacks() -> None:
+    rng = random.Random(99)
+    found_self_attack = False
+    for idx in range(50):
+        af, types = generate_random_instance(
+            rng, p=0.35, instance_id=idx, allow_self_attacks=True, require_non_empty_agents=True
+        )
+        # Every agent must receive at least 1 argument
+        for ag_args in types.values():
+            assert len(ag_args) >= 1
+        # Partition covers all arguments
+        union_args = set().union(*types.values())
+        assert union_args == set(af.arguments)
+        if any(u == v for u, v in af.attacks):
+            found_self_attack = True
+    assert found_self_attack is True
+
+
+def test_verified_explanation_on_example_5_11() -> None:
+    af11, t11 = build_example_5_11()
+    t54 = check_theorem_5_4_condition(af11, t11)
+    assert t54.condition_holds is False
+    ver = verify_why_strategyproof_despite_t54_failure(af11, t11, t54.violations)
+    assert ver.max_rescued_in_any_profile == 0
+    assert "1B. Path Cancelled" in ver.category
+    assert ver.truthful_utility == 4
+
+
 def test_small_experiment_run() -> None:
     summaries = run_experiments(
         num_instances_per_p=30,
@@ -50,6 +85,8 @@ def test_small_experiment_run() -> None:
         # Theorem 5.4 is a mathematically sufficient condition:
         # no instance can satisfy Theorem 5.4 yet fail strategyproofness!
         assert s.t54_holds_but_not_sp_count == 0
+        assert s.t54_distinct_holds_but_not_sp_count == 0
+        assert s.t54_simple_holds_but_not_sp_count == 0
         assert (
             s.theorem_5_4_holds_count
             + s.sp_although_t54_fails_count

@@ -293,8 +293,20 @@ class OddPathViolation:
 
     @property
     def length(self) -> int:
-        """Number of directed edges in the path (always odd: 1, 3, 5, ...)."""
+        """Number of directed edges in the path/walk (always odd: 1, 3, 5, ...)."""
         return len(self.odd_path) - 1
+
+    @property
+    def is_simple_path(self) -> bool:
+        """
+        True iff the sequence of vertices has no repeated vertices (or, when
+        source == target, is a simple cycle repeating only the start/end vertex).
+        False if the sequence is a walk that traverses a cycle and repeats
+        intermediate vertices.
+        """
+        if self.source == self.target:
+            return len(set(self.odd_path[:-1])) == len(self.odd_path) - 1
+        return len(set(self.odd_path)) == len(self.odd_path)
 
 
 @dataclass(frozen=True)
@@ -399,6 +411,41 @@ def find_odd_length_walk(
     return None
 
 
+def has_odd_path_naive_visited(
+    af: ArgumentationFramework,
+    source: str,
+    target: str,
+) -> bool:
+    """
+    Demonstration of a NAIVE single-visited-set BFS that fails to track parity
+    when cycles or reconvergent paths are present.
+
+    Why this naive algorithm is flawed:
+    Suppose `source` can reach an intermediate node `u` in 1 step (`source -> u`)
+    AND in 2 steps (`source -> w -> u`), and `u` attacks `target` (`u -> target`).
+    - At step 1, `u` is reached at odd distance 1 and added to `visited`.
+    - At step 2, from `u` we reach `target` at even distance 2 (`source -> u -> target`),
+      and from `w` we see `u` is already in `visited`, so `w -> u` is ignored!
+    - Consequently, the valid odd-length path `source -> w -> u -> target` (length 3)
+      is completely missed!
+    Similarly, if `source` reaches `u` at even distance 2 and `u` has an odd cycle
+    `u -> c1 -> c2 -> u` before `u -> target`, a single `visited` set refuses to
+    re-enter `u` after traversing the cycle, missing the odd-length walk.
+    """
+    queue: deque[Tuple[str, int]] = deque([(source, 0)])
+    visited: Set[str] = {source}
+    while queue:
+        u, dist = queue.popleft()
+        for v in sorted(af.attacked_by(u)):
+            next_dist = dist + 1
+            if v == target and (next_dist % 2 == 1):
+                return True
+            if v not in visited:
+                visited.add(v)
+                queue.append((v, next_dist))
+    return False
+
+
 def check_theorem_5_4_condition(
     global_af: ArgumentationFramework,
     agent_types: Mapping[str, Iterable[str]],
@@ -415,11 +462,12 @@ def check_theorem_5_4_condition(
       - `global_af`: The full argumentation framework <A, -> >.
       - `agent_types`: Mapping from agent identifier to its set of arguments A_i.
       - `allow_walks`: If True (default), uses parity-state BFS (`find_odd_length_walk`)
-        which detects any odd-length directed path/walk in the presence of cycles
-        (falling back to `find_odd_length_simple_path` when a simple path exists).
+        as a fallback when no simple odd path exists, detecting odd-length directed
+        walks that traverse cycles. If False, checks only simple odd paths/cycles.
       - `distinct_only`: If False (default), checks all pairs (alpha, beta) in A_i x A_i
-        (matching the formal statement in Theorem 5.4: "not exists alpha_1, alpha_2 in A_i
-        such that alpha_1 ->_odd alpha_2"). If True, checks only alpha != beta.
+        (matching the formal condition in Theorem 5.4 that A_i is conflict-free, which
+        excludes self-attacks alpha -> alpha of length 1, and has no alpha_1, alpha_2 in A_i
+        with an odd-length path). If True, checks only distinct arguments alpha != beta.
     """
     violations: List[OddPathViolation] = []
 

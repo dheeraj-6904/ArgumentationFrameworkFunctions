@@ -14,8 +14,11 @@ from src.book_examples import (
 from src.experiments import (
     InstanceRecord,
     ProbabilityBucketSummary,
+    SubsetDeviationRow,
+    VerifiedStrategyproofExplanation,
     generate_random_instance,
     run_experiments,
+    verify_why_strategyproof_despite_t54_failure,
 )
 from src.framework import (
     ArgumentationFramework,
@@ -64,6 +67,7 @@ from src.strategic import (
     find_odd_length_simple_path,
     find_odd_length_walk,
     grounded_direct_mechanism,
+    has_odd_path_naive_visited,
 )
 
 __all__ = [

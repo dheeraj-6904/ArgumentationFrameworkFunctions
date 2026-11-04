@@ -13,6 +13,7 @@ from src.strategic import (
     check_theorem_5_4_condition,
     find_best_responses,
     grounded_direct_mechanism,
+    has_odd_path_naive_visited,
 )
 
 
@@ -130,16 +131,13 @@ def test_example_5_11_cancellation_of_indirect_self_defeat(
 def test_theorem_5_4_cycle_handling() -> None:
     """
     Verify that `check_theorem_5_4_condition` correctly detects odd-length paths
-    in the presence of cycles and reconvergent even/odd paths where a naive BFS/DFS
-    would fail.
+    in the presence of cycles and reconvergent even/odd paths where a naive
+    visited-set BFS (`has_odd_path_naive_visited`) fails and produces a false
+    positive on a non-strategyproof instance!
     """
-    # Reconvergent graph:
-    #   a1 -> b -> a2 (length 2, EVEN)
-    #   a1 -> c -> d -> b -> a2 (length 4, EVEN)
-    #   b -> c (creates cycle b -> c -> d -> b of length 3!)
-    # Because of the cycle b -> c -> d -> b, the simple path is a1 -> c -> d -> b -> a2 (even)
-    # and a1 -> b -> a2 (even), wait: what about a1 -> b -> c -> d -> a2?
-    # Let's test both a reconvergent simple odd path AND an odd walk through a cycle!
+    # 1. Reconvergent 4-node graph:
+    #    - Even path (length 2): a1 -> b -> a2
+    #    - Odd path  (length 3): a1 -> c -> b -> a2
     af_reconvergent = ArgumentationFramework(
         arguments=["a1", "b", "c", "a2"],
         attacks=[
@@ -150,9 +148,56 @@ def test_theorem_5_4_cycle_handling() -> None:
         ],
     )
     types = {"x": {"a1", "a2"}}
+    # Naive visited-set BFS visits `b` at distance 1 from `a1`, so when `c` tries
+    # to transition `c -> b` at distance 2, `b` is already in `visited` and the
+    # odd path `a1 -> c -> b -> a2` is completely missed!
+    assert has_odd_path_naive_visited(af_reconvergent, "a1", "a2") is False
+
+    # Our cycle-aware Theorem 5.4 checker finds the odd path `a1 -> c -> b -> a2`:
     t54 = check_theorem_5_4_condition(af_reconvergent, types)
     assert t54.condition_holds is False
     assert any(
         v.source == "a1" and v.target == "a2" and v.odd_path == ("a1", "c", "b", "a2")
         for v in t54.violations
     )
+
+    # 2. Full 8-argument strategic counterexample where naive visited-set BFS
+    #    falsely claims Theorem 5.4's condition holds, yet Theorem 5.3 FAILS
+    #    (Agent x strictly gains by hiding a1)!
+    #    - Even path (length 4): a1 -> c -> a2 -> a3 -> a4 (and a5)
+    #    - Odd path  (length 5): a1 -> b1 -> b2 -> a2 -> a3 -> a4 (and a5)
+    #    - Plus cycle edge a2 -> c creating even 2-cycle c <-> a2.
+    af_counter = ArgumentationFramework(
+        arguments=["a1", "a2", "a3", "a4", "a5", "b1", "b2", "c"],
+        attacks=[
+            ("a1", "c"),
+            ("c", "a2"),
+            ("a2", "c"),   # cycle c <-> a2
+            ("a1", "b1"),
+            ("b1", "b2"),
+            ("b2", "a2"),
+            ("a2", "a3"),
+            ("a3", "a4"),
+            ("a3", "a5"),
+        ],
+    )
+    types_counter = {
+        "x": {"a1", "a4", "a5"},
+        "y": {"b1", "a2"},
+        "z": {"b2", "c", "a3"},
+    }
+    # Naive visited-set BFS misses all odd paths across all agents (returns False for all pairs):
+    naive_any_odd = any(
+        has_odd_path_naive_visited(af_counter, u, v)
+        for args in types_counter.values()
+        for u in args
+        for v in args
+    )
+    assert naive_any_odd is False  # Naive BFS falsely claims Theorem 5.4 holds!
+
+    # Yet the instance is NOT strategyproof (Theorem 5.3 is False), and our
+    # cycle-aware Theorem 5.4 checker correctly catches the length-5 odd paths!
+    t53_counter = check_theorem_5_3_strategyproof(af_counter, types_counter)
+    t54_counter = check_theorem_5_4_condition(af_counter, types_counter)
+    assert t53_counter.is_strategyproof is False
+    assert t54_counter.condition_holds is False

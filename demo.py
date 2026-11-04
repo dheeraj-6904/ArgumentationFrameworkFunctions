@@ -5,12 +5,12 @@ End-to-End Demonstration of:
   1. Part 1: Abstract Argumentation Engine on all Chapter 5 Book Examples
      (Figure 5.1, Figure 5.2, plus odd-cycle / semi-stable vs. preferred / stable showcase).
   2. Part 2: Strategic Argumentation & Grounded Direct Argumentation Mechanism
-     on Book Examples 5.10 and 5.11 (including verification of both textbook misprints).
-  3. Experiments: 3,000 Random Instances (1,000 per p in {0.15, 0.25, 0.35})
-     with 3 agents and 6 to 8 arguments, reporting:
-       - Fraction of instances that are strategyproof for each p
-       - Instances satisfying Theorem 5.4 yet failing strategyproofness (and why)
-       - Instances that are strategyproof although Theorem 5.4's condition fails (and why)
+     on Book Examples 5.10 and 5.11 (including verification of both textbook misprints
+     and a concrete cyclic/reconvergent graph demonstrating why naive visited-set BFS
+     fails on Theorem 5.4).
+  3. Part 3: Monte Carlo Experiments on 3,000 Random Instances (1,000 per p in {0.15, 0.25, 0.35})
+     with 3 non-empty agents, 6 to 8 arguments, and all n^2 possible directed attacks
+     (including self-attacks), plus a sensitivity comparison across generator variants.
 """
 
 from __future__ import annotations
@@ -22,17 +22,22 @@ from src.experiments import run_experiments
 from src.framework import ArgumentationFramework
 from src.labelling import generate_legal_labellings
 from src.semantics import compute_all_extensions, report_acceptance_status
+from src.strategic import (
+    check_theorem_5_3_strategyproof,
+    check_theorem_5_4_condition,
+    has_odd_path_naive_visited,
+)
 
 
 def run_additional_semantics_showcase() -> str:
     """
     Demonstrate frameworks where Preferred, Semi-Stable, and Stable extensions
-    diverge (e.g., odd-length cycles and asymmetric self-attacking branches).
+    diverge, and demonstrate why cycle-aware parity search is required for Theorem 5.4.
     """
     lines: list[str] = []
     sep = "=" * 78
     lines.append("\n" + sep)
-    lines.append("ADDITIONAL SHOWCASE: PREFERRED vs. SEMI-STABLE vs. STABLE SEMANTICS")
+    lines.append("ADDITIONAL SHOWCASE: SEMANTICS DIVERGENCE & CYCLE-AWARE THEOREM 5.4")
     lines.append(sep)
 
     # Case A: 3-cycle a1 -> a2 -> a3 -> a1
@@ -49,7 +54,7 @@ def run_additional_semantics_showcase() -> str:
     lines.append(f"    - Stable     : {[format_set(e) for e in exts_odd['stable']]} (None exists!)")
     lines.append(f"    - Labellings : {generate_legal_labellings(odd_cycle)}")
 
-    # Case B: a1 <-> a2, a2 -> a3, a3 -> a3 (where Preferred = [{a1}, {a2}], Semi-Stable/Stable = [{a2}])
+    # Case B: a1 <-> a2, a2 -> a3, a3 -> a3 (Preferred = [{a1}, {a2}], Semi-Stable/Stable = [{a2}])
     asymmetric = ArgumentationFramework(
         arguments=["a1", "a2", "a3"],
         attacks=[("a1", "a2"), ("a2", "a1"), ("a2", "a3"), ("a3", "a3")],
@@ -68,19 +73,73 @@ def run_additional_semantics_showcase() -> str:
             f"    - Status of {arg}: Preferred='{st_pref}', Semi-Stable='{st_semi}'"
         )
 
+    # Case C: Reconvergent/Cyclic Graph Where Naive Visited-Set BFS Fails on Theorem 5.4
+    af_cyc = ArgumentationFramework(
+        arguments=["a1", "a2", "a3", "a4", "a5", "b1", "b2", "c"],
+        attacks=[
+            ("a1", "c"),
+            ("c", "a2"),
+            ("a2", "c"),   # 2-cycle c <-> a2
+            ("a1", "b1"),
+            ("b1", "b2"),
+            ("b2", "a2"),
+            ("a2", "a3"),
+            ("a3", "a4"),
+            ("a3", "a5"),
+        ],
+    )
+    types_cyc = {
+        "x": {"a1", "a4", "a5"},
+        "y": {"b1", "a2"},
+        "z": {"b2", "c", "a3"},
+    }
+    naive_any_odd = any(
+        has_odd_path_naive_visited(af_cyc, u, v)
+        for args in types_cyc.values()
+        for u in args
+        for v in args
+    )
+    t53_cyc = check_theorem_5_3_strategyproof(af_cyc, types_cyc)
+    t54_cyc = check_theorem_5_4_condition(af_cyc, types_cyc)
+    lines.append(
+        "\n[C] Cyclic/Reconvergent Graph Demonstrating Why Cycle-Aware Parity Search is Essential:"
+    )
+    lines.append(f"    Framework  : {af_cyc}")
+    lines.append("    Agent Types: A_x={a1, a4, a5}, A_y={b1, a2}, A_z={b2, c, a3}")
+    lines.append(
+        "    - Even path from a1 to a4/a5 (length 4): a1 -> c -> a2 -> a3 -> a4 (visits a2 at even dist 2)"
+    )
+    lines.append(
+        "    - Odd path  from a1 to a4/a5 (length 5): a1 -> b1 -> b2 -> a2 -> a3 -> a4 (reaches a2 at odd dist 3)"
+    )
+    lines.append(
+        f"    - Naive Single-Visited-Set BFS (`has_odd_path_naive_visited`): finds odd path? {naive_any_odd} (FALSE POSITIVE: claims Thm 5.4 holds!)"
+    )
+    lines.append(
+        f"    - Cycle-Aware Theorem 5.4 Checker (`check_theorem_5_4_condition`): holds? {t54_cyc.condition_holds} "
+        f"(catches {[('->'.join(v.odd_path)) for v in t54_cyc.violations]})"
+    )
+    lines.append(
+        f"    - Exact Strategyproofness (`check_theorem_5_3_strategyproof`): {t53_cyc.is_strategyproof} "
+        f"(Agent x gains utility 2 > 1 by hiding a1 when Agent y reveals {{b1, a2}} and Agent z reveals {{b2, a3}})"
+    )
+
     return "\n".join(lines)
 
 
 def run_experiments_report(num_instances_per_p: int = 1000, seed: int = 42) -> str:
     """
     Execute the Monte Carlo experiments and format a detailed report answering
-    Questions 1, 2, and 3 of the Experiments section.
+    Questions 1, 2, and 3 of the Experiments section, plus a generator sensitivity
+    comparison table.
     """
     t0 = time.perf_counter()
     summaries = run_experiments(
         num_instances_per_p=num_instances_per_p,
         probabilities=(0.15, 0.25, 0.35),
         seed=seed,
+        allow_self_attacks=True,
+        require_non_empty_agents=True,
     )
     elapsed = time.perf_counter() - t0
 
@@ -94,23 +153,30 @@ def run_experiments_report(num_instances_per_p: int = 1000, seed: int = 42) -> s
     )
     lines.append(sep)
     lines.append(
-        f"Configuration: 3 agents, n in {{6, 7, 8}} arguments, p in {{0.15, 0.25, 0.35}}, seed={seed}"
+        f"Primary Generator Settings: 3 non-empty agents, n in {{6, 7, 8}} arguments, "
+        f"all n^2 directed attacks (self-attacks included) sampled with probability p in {{0.15, 0.25, 0.35}}, seed={seed}"
     )
     lines.append(f"Execution Time: {elapsed:.2f} seconds\n")
 
     header = (
-        f"{'p':<6} | {'Instances':<9} | {'Strategyproof (Thm 5.3)':<25} | "
-        f"{'Thm 5.4 Holds':<18} | {'Thm5.4 & ~SP':<13} | {'SP & ~Thm5.4':<14}"
+        f"{'p':<5} | {'N':<5} | {'Strategyproof (Thm 5.3)':<23} | "
+        f"{'Thm5.4 (All Pairs)':<18} | {'Thm5.4 (Distinct)':<17} | "
+        f"{'Thm5.4 & ~SP':<12} | {'SP & ~Thm5.4':<12}"
     )
     lines.append(header)
     lines.append("-" * len(header))
 
     for p, s in summaries.items():
         sp_str = f"{s.strategyproof_count}/{s.total_instances} ({s.strategyproof_fraction*100:.1f}%)"
-        t54_str = f"{s.theorem_5_4_holds_count}/{s.total_instances} ({s.theorem_5_4_holds_fraction*100:.1f}%)"
+        t54_all_str = f"{s.theorem_5_4_holds_count}/{s.total_instances} ({s.theorem_5_4_holds_fraction*100:.1f}%)"
+        t54_dist_str = (
+            f"{s.theorem_5_4_distinct_holds_count}/{s.total_instances} "
+            f"({s.theorem_5_4_distinct_holds_count/s.total_instances*100:.1f}%)"
+        )
         lines.append(
-            f"{p:<6.2f} | {s.total_instances:<9d} | {sp_str:<25} | "
-            f"{t54_str:<18} | {s.t54_holds_but_not_sp_count:<13d} | {s.sp_although_t54_fails_count:<14d}"
+            f"{p:<5.2f} | {s.total_instances:<5d} | {sp_str:<23} | "
+            f"{t54_all_str:<18} | {t54_dist_str:<17} | "
+            f"{s.t54_holds_but_not_sp_count:<12d} | {s.sp_although_t54_fails_count:<12d}"
         )
 
     lines.append("\n[Question 1] Fraction of instances that are strategyproof for each p:")
@@ -122,71 +188,89 @@ def run_experiments_report(num_instances_per_p: int = 1000, seed: int = 42) -> s
     lines.append(
         "\n[Question 2] Instances that satisfy Theorem 5.4 yet fail strategyproofness:"
     )
-    total_q2 = sum(s.t54_holds_but_not_sp_count for s in summaries.values())
-    lines.append(f"  - Total across all {total_all} instances: {total_q2}")
+    total_q2_all = sum(s.t54_holds_but_not_sp_count for s in summaries.values())
+    total_q2_dist = sum(s.t54_distinct_holds_but_not_sp_count for s in summaries.values())
+    total_q2_simp = sum(s.t54_simple_holds_but_not_sp_count for s in summaries.values())
     lines.append(
-        "  - Explanation: Theorem 5.4 is a mathematically proven SUFFICIENT condition"
+        f"  - Under Theorem 5.4 (all pairs alpha, beta in A_i, walks allowed)     : {total_q2_all}/{total_all}"
     )
     lines.append(
-        "    for strategyproofness. If an agent's argument set A_i has no internal"
+        f"  - Under Theorem 5.4 (distinct pairs alpha != beta, walks allowed)     : {total_q2_dist}/{total_all}"
     )
     lines.append(
-        "    (in)direct conflict (no odd-length directed walk/path between any alpha, beta in A_i),"
+        f"  - Under Theorem 5.4 (simple odd paths only, no repeated cycle nodes)  : {total_q2_simp}/{total_all}"
     )
-    lines.append(
-        "    revealing an argument alpha in A_i can only attack odd-distance external"
-    )
-    lines.append(
-        "    arguments and defend even-distance arguments, so it can NEVER cause another"
-    )
-    lines.append(
-        "    argument beta in A_i to be rejected from the grounded extension."
-    )
-    lines.append(
-        "    (Note: A naive BFS/DFS that marks vertices visited without tracking edge-length"
-    )
-    lines.append(
-        "    parity or backtracking over cycles would falsely report Theorem 5.4 as holding"
-    )
-    lines.append(
-        "    on reconvergent/cyclic graphs, producing bogus counterexamples.)"
-    )
+    lines.append("  - Diagnostic — Non-strategyproof instances with ONLY length-1 odd paths (no odd path of length >= 3):")
+    for p, s in summaries.items():
+        lines.append(
+            f"      * p = {p:.2f}: {s.only_len_1_not_sp_count} instances (if a checker ignored length-1 conflicts and only tested length >= 3, these would be false positives)"
+        )
 
     lines.append(
         "\n[Question 3] Instances that are strategyproof although Theorem 5.4's condition fails:"
+    )
+    lines.append(
+        "  (Verified by exhaustively computing G(S) = (A_i cap E_dev) \\ E_truth [rescued arguments]"
+    )
+    lines.append(
+        "   and L(S) = (A_i cap E_truth) \\ E_dev [sacrificed arguments] across ALL opponent profiles and ALL subsets S subseteq A_i)"
     )
     for p, s in summaries.items():
         lines.append(
             f"  - p = {p:.2f}: {s.sp_although_t54_fails_count}/{s.total_instances} instances ({s.sp_although_t54_fails_count/s.total_instances*100:.1f}%)"
         )
-        for reason, cnt in sorted(s.reason_breakdown.items(), key=lambda kv: -kv[1]):
+        for reason, cnt in sorted(s.reason_breakdown.items(), key=lambda kv: kv[0]):
             lines.append(f"      * {cnt:4d} instances: {reason}")
 
-    lines.append("\n   Concrete Sample Instances (Strategyproof Despite Theorem 5.4 Failing):")
+    lines.append(
+        "\n  Concrete Sample Instances & Full Deviation Verification (Strategyproof Despite Theorem 5.4 Failing):"
+    )
     for p, s in summaries.items():
         if s.sp_although_t54_fails_examples:
             ex = s.sp_although_t54_fails_examples[0]
+            v_exp = ex.verified_explanation
+            assert v_exp is not None
+            viol = v_exp.focus_violation
+            path_kind = (
+                "Simple odd path (no repeated vertices)"
+                if viol.is_simple_path
+                else "Odd directed walk (traverses cycle; repeated vertices allowed)"
+            )
             types_str = ", ".join(
                 f"{ag}={format_set(args)}" for ag, args in ex.agent_types.items()
             )
-            # Prefer showing an indirect odd path between distinct arguments if present
-            distinct_viols = [v for v in ex.violations if v.source != v.target]
-            indirect_viols = [v for v in distinct_viols if v.length >= 3]
-            viol = (
-                indirect_viols[0]
-                if indirect_viols
-                else (distinct_viols[0] if distinct_viols else ex.violations[0])
+            others_str = ", ".join(
+                f"{ag}={format_set(rep)}"
+                for ag, rep in v_exp.witness_opponent_reports.items()
             )
             lines.append(
-                f"  - [p={p:.2f}, Instance #{ex.instance_id}] {ex.af}"
+                f"\n  - [p={p:.2f}, Instance #{ex.instance_id}] {ex.af}"
             )
-            lines.append(f"      Agent Types : {types_str}")
+            lines.append(f"      Agent Types        : {types_str}")
             lines.append(
-                f"      Odd-Path Violation in {viol.agent}: {' -> '.join(viol.odd_path)} (length {viol.length})"
+                f"      Focus Violation    : {viol.agent} holds ({viol.source}, {viol.target}) with {' -> '.join(viol.odd_path)} "
+                f"[length {viol.length}, {path_kind}]"
             )
-            lines.append(f"      Why Strategyproof : {ex.sp_despite_failure_reason}")
+            lines.append(f"      Verified Category  : {v_exp.category}")
+            lines.append(
+                f"      Max Rescued |G(S)| : {v_exp.max_rescued_in_any_profile} across all opponent report profiles"
+            )
+            lines.append(
+                f"      Deviation Table for {v_exp.focus_agent} (against opponent reports {others_str}):"
+            )
+            for row in v_exp.deviation_table:
+                lines.append(
+                    f"        Reveal S={format_set(row.revealed_subset):<14} -> "
+                    f"E_dev={format_set(row.induced_grounded):<18} | "
+                    f"Own Accepted={format_set(row.accepted_own):<14} | "
+                    f"Rescued G={format_set(row.rescued_args):<10} | "
+                    f"Sacrificed L={format_set(row.sacrificed_args):<10} | "
+                    f"u={row.utility}"
+                )
 
-    lines.append("\n  Concrete Sample Instances Where Strategyproofness FAILS (Both Thm 5.3 & 5.4 Fail):")
+    lines.append(
+        "\n  Concrete Sample Instances Where Strategyproofness FAILS (Both Thm 5.3 & 5.4 Fail):"
+    )
     for p, s in summaries.items():
         if s.not_sp_examples:
             ex = s.not_sp_examples[0]
@@ -211,6 +295,36 @@ def run_experiments_report(num_instances_per_p: int = 1000, seed: int = 42) -> s
             lines.append(
                 f"      Strategic   : reveals {format_set(w.profitable_report)} -> E_grnd={format_set(w.manipulated_outcome)} (utility={w.manipulated_utility})"
             )
+
+    # -------------------------------------------------------------------------
+    # Generator & Design-Choice Sensitivity Table
+    # -------------------------------------------------------------------------
+    lines.append("\n" + sep)
+    lines.append("APPENDIX: GENERATOR & DESIGN-CHOICE SENSITIVITY COMPARISON (SEED=42)")
+    lines.append(sep)
+    configs = [
+        (True, True, "n^2 attacks (self-attacks ON),  Non-Empty Agents (PRIMARY)"),
+        (True, False, "n^2 attacks (self-attacks ON),  Unrestricted i.i.d. Agents"),
+        (False, True, "n(n-1) attacks (no self-loops), Non-Empty Agents"),
+        (False, False, "n(n-1) attacks (no self-loops), Unrestricted i.i.d. Agents"),
+    ]
+    for self_att, non_emp, label in configs:
+        sub_sum = run_experiments(
+            num_instances_per_p=num_instances_per_p,
+            probabilities=(0.15, 0.25, 0.35),
+            seed=seed,
+            allow_self_attacks=self_att,
+            require_non_empty_agents=non_emp,
+        )
+        sp_list = [f"p={p}: {sub_sum[p].strategyproof_count}/{num_instances_per_p}" for p in (0.15, 0.25, 0.35)]
+        t54_all_list = [f"p={p}: {sub_sum[p].theorem_5_4_holds_count}" for p in (0.15, 0.25, 0.35)]
+        t54_dist_list = [f"p={p}: {sub_sum[p].theorem_5_4_distinct_holds_count}" for p in (0.15, 0.25, 0.35)]
+        q2_list = [sub_sum[p].t54_holds_but_not_sp_count for p in (0.15, 0.25, 0.35)]
+        lines.append(f"\n  * {label}:")
+        lines.append(f"      Strategyproof (Thm 5.3)      : {', '.join(sp_list)}")
+        lines.append(f"      Thm 5.4 Holds (All Pairs)    : {', '.join(t54_all_list)}")
+        lines.append(f"      Thm 5.4 Holds (Distinct Only): {', '.join(t54_dist_list)}")
+        lines.append(f"      Thm 5.4 Holds & ~SP (Q2)     : {q2_list} (Always 0!)")
 
     return "\n".join(lines)
 

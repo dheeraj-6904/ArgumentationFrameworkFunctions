@@ -50,11 +50,12 @@ ArgumentationFrameworkFunctions/
    - **(D) All Legal (`in`/`out`/`undec`) Labellings**: [`generate_legal_labellings(af)`](src/labelling.py)
    - **(E) Argument Acceptance Status (`skeptically accepted` / `credulously accepted` / `rejected`)**: [`report_acceptance_status(af, alpha, semantics="preferred")`](src/semantics.py)
 
-### Part 2: Strategic Argumentation
+### Part 2: Strategic Argumentation & Experiments
 1. **Grounded Direct Argumentation Mechanism**: [`grounded_direct_mechanism(global_af, revealed_reports)`](src/strategic.py)
 2. **Subset Enumeration & Best-Response Utility Maximization**: [`find_best_responses(global_af, agent_id, agent_true_args, other_agents_reports)`](src/strategic.py)
 3. **Theorem 5.3 Verification (Exact Strategyproofness)**: [`check_theorem_5_3_strategyproof(global_af, agent_types)`](src/strategic.py)
-4. **Theorem 5.4 Verification (No Odd-Length Directed Path with Cycle Handling)**: [`check_theorem_5_4_condition(global_af, agent_types)`](src/strategic.py)
+4. **Theorem 5.4 Verification (No Odd-Length Directed Path/Walk with Cycle Handling)**: [`check_theorem_5_4_condition(global_af, agent_types, allow_walks=True, distinct_only=False)`](src/strategic.py) (along with [`has_odd_path_naive_visited`](src/strategic.py) demonstrating why single-visited-set BFS fails on cyclic/reconvergent graphs)
+5. **Random Instance Generator & Verified Outcome Analyzer**: [`generate_random_instance(rng, p, allow_self_attacks=True, require_non_empty_agents=True)`](src/experiments.py) and [`verify_why_strategyproof_despite_t54_failure(af, agent_types, violations)`](src/experiments.py)
 
 ---
 
